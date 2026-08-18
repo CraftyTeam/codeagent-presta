@@ -2,7 +2,7 @@
 <module>
     <name>codeagentpresta</name>
     <displayName><![CDATA[CodeAgent Presta]]></displayName>
-    <version><![CDATA[1.0.0]]></version>
+    <version><![CDATA[1.0.1]]></version>
     <description><![CDATA[Development tools for CodeAgent through the official PrestaShop MCP Server.]]></description>
     <author><![CDATA[Sergiu Rus]]></author>
     <tab><![CDATA[administration]]></tab>

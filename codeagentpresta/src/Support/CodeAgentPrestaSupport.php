@@ -148,7 +148,10 @@ final class CodeAgentPrestaSupport
             throw new PsMcpToolCallException('File content exceeds the 1 MB write limit.', 1);
         }
         $absolute = self::absolute($relative, file_exists(self::root() . '/' . $relative));
-        if (file_exists($absolute) && $expectedSha256 !== null && $expectedSha256 !== '') {
+        if (file_exists($absolute)) {
+            if ($expectedSha256 === null || $expectedSha256 === '') {
+                throw new PsMcpToolCallException('expected_sha256 is required when replacing an existing file. Read the file first.', 1);
+            }
             $current = hash_file('sha256', $absolute);
             if (!is_string($current) || !hash_equals(strtolower($expectedSha256), strtolower($current))) {
                 throw new PsMcpToolCallException('File changed since it was read. Re-read it before writing.', 1);

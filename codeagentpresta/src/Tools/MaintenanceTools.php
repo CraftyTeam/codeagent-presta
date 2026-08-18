@@ -56,6 +56,7 @@ final class CodeAgentPrestaMaintenanceTools
             }
             fclose($handle);
             $chunks = preg_split('/\r?\n/', $buffer) ?: [];
+            $chunks = array_map([$this, 'redactLogLine'], $chunks);
             $out[] = ['file' => basename($path), 'lines' => array_slice($chunks, -$lines)];
         }
         return ['logs' => $out, 'count' => count($out)];
@@ -69,7 +70,7 @@ final class CodeAgentPrestaMaintenanceTools
         if (!Module::isInstalled($name)) {
             throw new PsMcpToolCallException('Module is not installed.', 1);
         }
-        $ok = $module->enable(true);
+        $ok = $module->enable(false);
         return ['name' => $name, 'enabled' => (bool) $ok, 'active' => Module::isEnabled($name)];
     }
 
@@ -81,11 +82,11 @@ final class CodeAgentPrestaMaintenanceTools
             throw new PsMcpToolCallException('CodeAgent Presta cannot disable itself through MCP.', 1);
         }
         $module = $this->module($name);
-        $ok = $module->disable(true);
+        $ok = $module->disable(false);
         return ['name' => $name, 'disabled' => (bool) $ok, 'active' => Module::isEnabled($name)];
     }
 
-    #[PsMcpTool(name: 'codeagent_presta_module_install', title: 'Install PrestaShop module', description: 'Installs a module that already exists under modules/. Does not download arbitrary packages.', annotations: new PsMcpToolAnnotations(title: 'Install PrestaShop module', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
+    #[PsMcpTool(name: 'codeagent_presta_module_install', title: 'Install PrestaShop module', description: 'Installs a module that already exists under modules/. Does not download arbitrary packages.', annotations: new PsMcpToolAnnotations(title: 'Install PrestaShop module', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false))]
     #[PsMcpSchema(properties: ['name' => ['type' => 'string']], required: ['name'])]
     public function moduleInstall(string $name): array
     {
@@ -110,6 +111,16 @@ final class CodeAgentPrestaMaintenanceTools
         }
         $ok = $module->uninstall();
         return ['name' => $name, 'installed' => Module::isInstalled($name), 'changed' => (bool) $ok];
+    }
+
+    private function redactLogLine(string $line): string
+    {
+        $patterns = [
+            '/((?:password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie|credential)\s*[=:]\s*)[^\s,;]+/i',
+            '/(Bearer\s+)[A-Za-z0-9._~+\/-]+/i',
+            '/([?&](?:token|key|secret|password)=)[^&\s]+/i',
+        ];
+        return (string) preg_replace($patterns, '$1[REDACTED]', $line);
     }
 
     private function module(string $name): Module

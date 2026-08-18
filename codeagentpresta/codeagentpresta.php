@@ -9,7 +9,7 @@ class CodeAgentPresta extends Module
     {
         $this->name = 'codeagentpresta';
         $this->tab = 'administration';
-        $this->version = '1.0.0';
+        $this->version = '1.0.1';
         $this->author = 'Sergiu Rus';
         $this->need_instance = 0;
         $this->bootstrap = true;

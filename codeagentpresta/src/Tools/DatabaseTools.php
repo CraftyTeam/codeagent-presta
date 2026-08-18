@@ -54,8 +54,21 @@ final class CodeAgentPrestaDatabaseTools
             throw new PsMcpToolCallException('Unsafe SQL construct is blocked.', 1);
         }
         $limit = max(1, min(500, $limit));
-        if (preg_match('/^SELECT\b/i', $sql) && !preg_match('/\bLIMIT\s+\d+/i', $sql)) {
-            $sql .= ' LIMIT ' . $limit;
+        if (preg_match('/^SELECT\b/i', $sql)) {
+            if (preg_match('/\bLIMIT\s+(?:(\d+)\s*,\s*)?(\d+)(?:\s+OFFSET\s+\d+)?\s*$/i', $sql, $limitMatch)) {
+                $requested = (int) $limitMatch[2];
+                if ($requested > $limit) {
+                    throw new PsMcpToolCallException('SQL LIMIT exceeds the requested tool limit.', 1);
+                }
+            } else {
+                $sql .= ' LIMIT ' . $limit;
+            }
+        }
+        if (preg_match('/\b(mysql|information_schema|performance_schema|sys)\s*\./i', $sql)) {
+            throw new PsMcpToolCallException('Queries outside the current PrestaShop database are blocked.', 1);
+        }
+        if (preg_match('/\b(GET_LOCK|RELEASE_LOCK|IS_FREE_LOCK|IS_USED_LOCK)\s*\(/i', $sql)) {
+            throw new PsMcpToolCallException('Database locking functions are blocked.', 1);
         }
         $started = microtime(true);
         $rows = Db::getInstance()->executeS($sql);

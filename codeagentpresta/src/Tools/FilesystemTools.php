@@ -113,19 +113,30 @@ final class CodeAgentPrestaFilesystemTools
         return ['deleted' => true, 'path' => $relative];
     }
 
-    #[PsMcpTool(name: 'codeagent_presta_directory_create', title: 'Create PrestaShop development directory', description: 'Creates a directory recursively inside an allowed development root.', annotations: new PsMcpToolAnnotations(title: 'Create PrestaShop development directory', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
+    #[PsMcpTool(name: 'codeagent_presta_directory_create', title: 'Create PrestaShop development directory', description: 'Creates a directory recursively inside an allowed development root. Existing parent directories are validated against the PrestaShop root.', annotations: new PsMcpToolAnnotations(title: 'Create PrestaShop development directory', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
     #[PsMcpSchema(properties: ['path' => ['type' => 'string']], required: ['path'])]
     public function directoryCreate(string $path): array
     {
         $relative = CodeAgentPrestaSupport::normalizeRelative($path);
         CodeAgentPrestaSupport::assertWritablePath($relative . '/placeholder');
-        $absolute = CodeAgentPrestaSupport::root() . '/' . $relative;
+        $root = CodeAgentPrestaSupport::root();
+        $absolute = $root . '/' . $relative;
         if (is_dir($absolute)) {
             return ['created' => false, 'exists' => true, 'path' => $relative];
         }
-        $parent = CodeAgentPrestaSupport::absolute(dirname($relative) === '.' ? '' : dirname($relative));
-        $target = $parent . '/' . basename($relative);
-        if (!mkdir($target, 0755, true)) {
+        $probe = dirname($absolute);
+        while (!is_dir($probe) && $probe !== $root && str_starts_with(str_replace('\\', '/', $probe), $root . '/')) {
+            $probe = dirname($probe);
+        }
+        $realParent = realpath($probe);
+        if ($realParent === false) {
+            throw new PsMcpToolCallException('Unable to resolve destination parent.', 1);
+        }
+        $realParent = str_replace('\\', '/', $realParent);
+        if ($realParent !== $root && !str_starts_with($realParent, $root . '/')) {
+            throw new PsMcpToolCallException('Directory path escapes the PrestaShop root.', 1);
+        }
+        if (!mkdir($absolute, 0755, true) && !is_dir($absolute)) {
             throw new PsMcpToolCallException('Unable to create directory.', 1);
         }
         return ['created' => true, 'path' => $relative];
