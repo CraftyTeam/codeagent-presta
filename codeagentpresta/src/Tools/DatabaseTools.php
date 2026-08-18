@@ -50,7 +50,10 @@ final class CodeAgentPrestaDatabaseTools
         if (!preg_match('/^(SELECT|SHOW|DESCRIBE|DESC|EXPLAIN)\b/i', $sql)) {
             throw new PsMcpToolCallException('Only read-only SQL statements are allowed.', 1);
         }
-        if (preg_match('/\b(INTO\s+OUTFILE|INTO\s+DUMPFILE|FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|SLEEP\s*\(|BENCHMARK\s*\(|LOAD_FILE\s*\()/i', $sql)) {
+        if (preg_match('/^EXPLAIN\b/i', $sql) && !preg_match('/^EXPLAIN(?:\s+FORMAT\s*=\s*(?:JSON|TREE|TRADITIONAL))?\s+SELECT\b/i', $sql)) {
+            throw new PsMcpToolCallException('EXPLAIN is restricted to SELECT statements.', 1);
+        }
+        if (preg_match('/\b(INTO\s+OUTFILE|INTO\s+DUMPFILE|FOR\s+UPDATE|LOCK\s+IN\s+SHARE\s+MODE|SLEEP\s*\(|BENCHMARK\s*\(|LOAD_FILE\s*\()|:=/i', $sql)) {
             throw new PsMcpToolCallException('Unsafe SQL construct is blocked.', 1);
         }
         $limit = max(1, min(500, $limit));
@@ -64,7 +67,7 @@ final class CodeAgentPrestaDatabaseTools
                 $sql .= ' LIMIT ' . $limit;
             }
         }
-        if (preg_match('/\b(mysql|information_schema|performance_schema|sys)\s*\./i', $sql)) {
+        if (preg_match('/(?:`?(?:mysql|information_schema|performance_schema|sys)`?)\s*\./i', $sql)) {
             throw new PsMcpToolCallException('Queries outside the current PrestaShop database are blocked.', 1);
         }
         if (preg_match('/\b(GET_LOCK|RELEASE_LOCK|IS_FREE_LOCK|IS_USED_LOCK)\s*\(/i', $sql)) {

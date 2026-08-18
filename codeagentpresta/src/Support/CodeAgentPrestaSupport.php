@@ -59,33 +59,60 @@ final class CodeAgentPrestaSupport
             }
             return $real;
         }
-        $parent = realpath(dirname($absolute));
+        $probe = dirname($absolute);
+        $missing = [basename($absolute)];
+        while (!is_dir($probe) && $probe !== $root && str_starts_with(str_replace('\\', '/', $probe), $root . '/')) {
+            array_unshift($missing, basename($probe));
+            $probe = dirname($probe);
+        }
+        $parent = realpath($probe);
         if ($parent === false) {
-            throw new PsMcpToolCallException('Parent directory does not exist.', 1);
+            throw new PsMcpToolCallException('Unable to resolve destination parent.', 1);
         }
         $parent = str_replace('\\', '/', $parent);
         if ($parent !== $root && !str_starts_with($parent, $root . '/')) {
             throw new PsMcpToolCallException('Path escapes the PrestaShop root.', 1);
         }
-        return $parent . '/' . basename($absolute);
+        return rtrim($parent, '/') . '/' . implode('/', $missing);
     }
 
     public static function assertReadablePath(string $relative): void
     {
         $relative = strtolower(self::normalizeRelative($relative));
-        $blocked = [
+        $blockedExact = [
             'app/config/parameters.php',
+            'app/config/parameters.yml',
+            'app/config/parameters.yaml',
+            'config/parameters.php',
+            'config/parameters.yml',
+            'config/parameters.yaml',
             'config/settings.inc.php',
-            '.env',
-            '.env.local',
-            '.git/',
-            'var/sessions/',
+            'auth.json',
+            'composer/auth.json',
         ];
-        foreach ($blocked as $item) {
-            if ($relative === rtrim($item, '/') || str_starts_with($relative . '/', $item)) {
-                throw new PsMcpToolCallException('Access to sensitive credentials or session storage is blocked.', 1);
-            }
+        if (in_array($relative, $blockedExact, true)
+            || preg_match('#(^|/)\.env(?:\.|$)#i', $relative)
+            || preg_match('#(^|/)auth\.json$#i', $relative)
+            || str_contains('/' . $relative . '/', '/.git/')
+            || str_starts_with($relative . '/', 'var/sessions/')
+            || str_starts_with($relative . '/', 'var/cache/')
+            || str_starts_with($relative . '/', 'var/log/')
+            || str_starts_with($relative . '/', 'var/logs/')) {
+            throw new PsMcpToolCallException('Access to sensitive credentials, sessions, raw logs or runtime cache is blocked.', 1);
         }
+    }
+
+    public static function relativeFromAbsolute(string $absolute): string
+    {
+        $root = self::root();
+        $absolute = str_replace('\\', '/', $absolute);
+        if ($absolute === $root) {
+            return '';
+        }
+        if (!str_starts_with($absolute, $root . '/')) {
+            throw new PsMcpToolCallException('Path escapes the PrestaShop root.', 1);
+        }
+        return ltrim(substr($absolute, strlen($root)), '/');
     }
 
     public static function assertWritablePath(string $relative): void
@@ -95,12 +122,29 @@ final class CodeAgentPrestaSupport
         }
         $relative = self::normalizeRelative($relative);
         $allowed = ['modules/', 'themes/', 'override/', 'mails/', 'translations/'];
+        $allowedPath = false;
         foreach ($allowed as $prefix) {
             if (str_starts_with($relative, $prefix)) {
-                return;
+                $allowedPath = true;
+                break;
             }
         }
-        throw new PsMcpToolCallException('Writes are restricted to modules, themes, override, mails and translations.', 1);
+        if (!$allowedPath) {
+            throw new PsMcpToolCallException('Writes are restricted to modules, themes, override, mails and translations.', 1);
+        }
+        $current = self::root();
+        foreach (explode('/', $relative) as $part) {
+            if ($part === '') {
+                continue;
+            }
+            $current .= '/' . $part;
+            if (is_link($current)) {
+                throw new PsMcpToolCallException('Writing through symbolic links is blocked.', 1);
+            }
+            if (!file_exists($current)) {
+                break;
+            }
+        }
     }
 
     public static function readFile(string $path, int $offset = 0, int $length = 262144): array
@@ -108,6 +152,7 @@ final class CodeAgentPrestaSupport
         $relative = self::normalizeRelative($path);
         self::assertReadablePath($relative);
         $absolute = self::absolute($relative);
+        self::assertReadablePath(self::relativeFromAbsolute($absolute));
         if (!is_file($absolute) || !is_readable($absolute)) {
             throw new PsMcpToolCallException('File is not readable.', 1);
         }
@@ -147,7 +192,12 @@ final class CodeAgentPrestaSupport
         if (strlen($content) > self::MAX_WRITE_BYTES) {
             throw new PsMcpToolCallException('File content exceeds the 1 MB write limit.', 1);
         }
-        $absolute = self::absolute($relative, file_exists(self::root() . '/' . $relative));
+        $rawAbsolute = self::root() . '/' . $relative;
+        if (is_link($rawAbsolute)) {
+            throw new PsMcpToolCallException('Writing through symbolic links is blocked.', 1);
+        }
+        $absolute = self::absolute($relative, file_exists($rawAbsolute));
+        self::assertWritablePath(self::relativeFromAbsolute($absolute));
         if (file_exists($absolute)) {
             if ($expectedSha256 === null || $expectedSha256 === '') {
                 throw new PsMcpToolCallException('expected_sha256 is required when replacing an existing file. Read the file first.', 1);

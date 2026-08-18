@@ -40,10 +40,14 @@ final class CodeAgentPrestaFilesystemTools
         }
         $limit = max(1, min(200, $limit));
         $results = [];
+        $scannedFiles = 0;
+        $scannedBytes = 0;
+        $maxScannedFiles = 2000;
+        $maxScannedBytes = 67108864;
         $extensions = ['php','tpl','twig','js','css','scss','json','xml','yml','yaml','md','txt','sql','html','htm'];
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
         foreach ($iterator as $file) {
-            if (!$file->isFile() || $file->getSize() > 2097152) {
+            if (!$file->isFile() || $file->isLink() || $file->getSize() > 2097152) {
                 continue;
             }
             $ext = strtolower(pathinfo($file->getFilename(), PATHINFO_EXTENSION));
@@ -57,6 +61,11 @@ final class CodeAgentPrestaFilesystemTools
             } catch (Throwable $e) {
                 continue;
             }
+            $scannedFiles++;
+            $scannedBytes += max(0, (int) $file->getSize());
+            if ($scannedFiles > $maxScannedFiles || $scannedBytes > $maxScannedBytes) {
+                return ['results' => $results, 'count' => count($results), 'truncated' => true, 'scan_truncated' => true, 'scanned_files' => $scannedFiles - 1, 'scanned_bytes' => $scannedBytes - max(0, (int) $file->getSize())];
+            }
             $handle = @fopen($full, 'rb');
             if ($handle === false) {
                 continue;
@@ -67,7 +76,8 @@ final class CodeAgentPrestaFilesystemTools
                 $matched = false;
                 if ($regex) {
                     $flags = $case_sensitive ? 'u' : 'iu';
-                    $matched = @preg_match('~' . str_replace('~', '\\~', $query) . '~' . $flags, $line) === 1;
+                    $subject = strlen($line) > 65536 ? substr($line, 0, 65536) : $line;
+                    $matched = @preg_match('~(*LIMIT_MATCH=100000)(*LIMIT_RECURSION=10000)' . str_replace('~', '\\~', $query) . '~' . $flags, $subject) === 1;
                 } else {
                     $matched = $case_sensitive ? str_contains($line, $query) : stripos($line, $query) !== false;
                 }
@@ -81,7 +91,7 @@ final class CodeAgentPrestaFilesystemTools
             }
             fclose($handle);
         }
-        return ['results' => $results, 'count' => count($results), 'truncated' => false];
+        return ['results' => $results, 'count' => count($results), 'truncated' => false, 'scan_truncated' => false, 'scanned_files' => $scannedFiles, 'scanned_bytes' => $scannedBytes];
     }
 
     #[PsMcpTool(name: 'codeagent_presta_file_write', title: 'Write PrestaShop development file', description: 'Atomically creates or replaces a file in modules, themes, override, mails or translations. Use expected_sha256 when replacing an existing file.', annotations: new PsMcpToolAnnotations(title: 'Write PrestaShop development file', readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
@@ -97,8 +107,13 @@ final class CodeAgentPrestaFilesystemTools
     {
         $relative = CodeAgentPrestaSupport::normalizeRelative($path);
         CodeAgentPrestaSupport::assertWritablePath($relative);
+        $rawAbsolute = CodeAgentPrestaSupport::root() . '/' . $relative;
+        if (is_link($rawAbsolute)) {
+            throw new PsMcpToolCallException('Deleting symbolic links is blocked.', 1);
+        }
         $absolute = CodeAgentPrestaSupport::absolute($relative);
-        if (!is_file($absolute) || is_link($absolute)) {
+        CodeAgentPrestaSupport::assertWritablePath(CodeAgentPrestaSupport::relativeFromAbsolute($absolute));
+        if (!is_file($absolute)) {
             throw new PsMcpToolCallException('Only regular files can be deleted by this tool.', 1);
         }
         if ($expected_sha256 !== '') {
@@ -118,23 +133,21 @@ final class CodeAgentPrestaFilesystemTools
     public function directoryCreate(string $path): array
     {
         $relative = CodeAgentPrestaSupport::normalizeRelative($path);
+        if ($relative === '') {
+            throw new PsMcpToolCallException('Directory path is required.', 1);
+        }
         CodeAgentPrestaSupport::assertWritablePath($relative . '/placeholder');
-        $root = CodeAgentPrestaSupport::root();
-        $absolute = $root . '/' . $relative;
+        $rawAbsolute = CodeAgentPrestaSupport::root() . '/' . $relative;
+        if (is_link($rawAbsolute)) {
+            throw new PsMcpToolCallException('Creating through symbolic links is blocked.', 1);
+        }
+        $absolute = CodeAgentPrestaSupport::absolute($relative, file_exists($rawAbsolute));
+        CodeAgentPrestaSupport::assertWritablePath(CodeAgentPrestaSupport::relativeFromAbsolute($absolute) . '/placeholder');
         if (is_dir($absolute)) {
             return ['created' => false, 'exists' => true, 'path' => $relative];
         }
-        $probe = dirname($absolute);
-        while (!is_dir($probe) && $probe !== $root && str_starts_with(str_replace('\\', '/', $probe), $root . '/')) {
-            $probe = dirname($probe);
-        }
-        $realParent = realpath($probe);
-        if ($realParent === false) {
-            throw new PsMcpToolCallException('Unable to resolve destination parent.', 1);
-        }
-        $realParent = str_replace('\\', '/', $realParent);
-        if ($realParent !== $root && !str_starts_with($realParent, $root . '/')) {
-            throw new PsMcpToolCallException('Directory path escapes the PrestaShop root.', 1);
+        if (file_exists($absolute)) {
+            throw new PsMcpToolCallException('A non-directory path already exists at the destination.', 1);
         }
         if (!mkdir($absolute, 0755, true) && !is_dir($absolute)) {
             throw new PsMcpToolCallException('Unable to create directory.', 1);

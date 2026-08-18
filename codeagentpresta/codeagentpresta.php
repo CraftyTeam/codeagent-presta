@@ -9,7 +9,7 @@ class CodeAgentPresta extends Module
     {
         $this->name = 'codeagentpresta';
         $this->tab = 'administration';
-        $this->version = '1.0.1';
+        $this->version = '1.1.0';
         $this->author = 'Sergiu Rus';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -18,7 +18,7 @@ class CodeAgentPresta extends Module
         parent::__construct();
 
         $this->displayName = $this->l('CodeAgent Presta');
-        $this->description = $this->l('Development tools for CodeAgent through the official PrestaShop MCP Server.');
+        $this->description = $this->l('Development and design tools for CodeAgent through the official PrestaShop MCP Server.');
         $this->confirmUninstall = $this->l('Remove CodeAgent Presta development tools?');
     }
 

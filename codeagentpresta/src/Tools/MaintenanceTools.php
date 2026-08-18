@@ -30,7 +30,7 @@ final class CodeAgentPrestaMaintenanceTools
                 continue;
             }
             foreach (glob($dir . '/*') ?: [] as $path) {
-                if (!is_file($path) || filesize($path) > 52428800) {
+                if (!is_file($path) || is_link($path) || filesize($path) > 52428800) {
                     continue;
                 }
                 if ($filename !== '' && basename($path) !== $filename) {

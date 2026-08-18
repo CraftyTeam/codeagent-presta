@@ -17,6 +17,7 @@ final class CodeAgentPrestaPlatformTools
     {
         $context = Context::getContext();
         $theme = $context->shop && $context->shop->theme ? $context->shop->theme->getName() : null;
+        $codeAgentModule = Module::getInstanceByName('codeagentpresta');
         return [
             'prestashop_version' => _PS_VERSION_,
             'php_version' => PHP_VERSION,
@@ -30,7 +31,7 @@ final class CodeAgentPrestaPlatformTools
             'debug_mode' => defined('_PS_MODE_DEV_') ? (bool) _PS_MODE_DEV_ : false,
             'db_prefix' => CodeAgentPrestaSupport::dbPrefix(),
             'root' => CodeAgentPrestaSupport::root(),
-            'module_version' => Module::getInstanceByName('codeagentpresta')?->version,
+            'module_version' => $codeAgentModule ? (string) $codeAgentModule->version : null,
         ];
     }
 
@@ -38,28 +39,61 @@ final class CodeAgentPrestaPlatformTools
     #[PsMcpSchema(properties: ['active_only' => ['type' => 'boolean']], required: [])]
     public function modulesList(bool $active_only = false): array
     {
+        $context = Context::getContext();
+        $shopId = $context->shop ? (int) $context->shop->id : 0;
+        $installedRows = Db::getInstance()->executeS('SELECT m.id_module,m.name,CASE WHEN ms.id_module IS NULL THEN 0 ELSE 1 END AS active FROM `' . _DB_PREFIX_ . 'module` m LEFT JOIN `' . _DB_PREFIX_ . 'module_shop` ms ON ms.id_module=m.id_module AND ms.id_shop=' . (int) $shopId);
+        $installed = [];
+        foreach ((array) $installedRows as $row) {
+            $installed[(string) $row['name']] = ['id' => (int) $row['id_module'], 'active' => (bool) $row['active']];
+        }
         $modules = [];
-        foreach (Module::getModulesOnDisk(true) as $row) {
-            $name = (string) ($row->name ?? '');
-            if ($name === '') {
+        foreach (glob(CodeAgentPrestaSupport::root() . '/modules/*', GLOB_ONLYDIR) ?: [] as $dir) {
+            $name = basename($dir);
+            if (!preg_match('/^[a-zA-Z0-9_-]{1,128}$/D', $name) || !is_file($dir . '/' . $name . '.php')) {
                 continue;
             }
-            $instance = Module::getInstanceByName($name);
-            $active = $instance ? (bool) Module::isEnabled($name) : false;
-            if ($active_only && !$active) {
+            $state = $installed[$name] ?? ['id' => 0, 'active' => false];
+            if ($active_only && !$state['active']) {
                 continue;
             }
+            $meta = $this->moduleXmlMetadata($dir . '/config.xml');
             $modules[] = [
                 'name' => $name,
-                'display_name' => $instance ? (string) $instance->displayName : (string) ($row->displayName ?? $name),
-                'version' => $instance ? (string) $instance->version : (string) ($row->version ?? ''),
-                'author' => $instance ? (string) $instance->author : (string) ($row->author ?? ''),
-                'active' => $active,
-                'installed' => (bool) Module::isInstalled($name),
+                'display_name' => $meta['display_name'] ?? $name,
+                'version' => $meta['version'] ?? null,
+                'author' => $meta['author'] ?? null,
+                'active' => (bool) $state['active'],
+                'installed' => (int) $state['id'] > 0,
             ];
+            if (count($modules) >= 1000) {
+                break;
+            }
         }
         usort($modules, static fn(array $a, array $b): int => strcasecmp($a['name'], $b['name']));
-        return ['modules' => array_slice($modules, 0, 1000), 'count' => count($modules), 'truncated' => count($modules) > 1000];
+        return ['modules' => $modules, 'count' => count($modules), 'truncated' => count($modules) >= 1000];
+    }
+
+    private function moduleXmlMetadata(string $path): array
+    {
+        if (!is_file($path) || is_link($path) || !is_readable($path) || (filesize($path) ?: 0) > 262144) {
+            return [];
+        }
+        $raw = file_get_contents($path);
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+        $previous = libxml_use_internal_errors(true);
+        $xml = simplexml_load_string($raw, 'SimpleXMLElement', LIBXML_NONET | LIBXML_NOCDATA);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        if (!$xml) {
+            return [];
+        }
+        return [
+            'display_name' => trim((string) ($xml->displayName ?? '')) ?: null,
+            'version' => trim((string) ($xml->version ?? '')) ?: null,
+            'author' => trim((string) ($xml->author ?? '')) ?: null,
+        ];
     }
 
     #[PsMcpTool(name: 'codeagent_presta_module_info', title: 'Inspect PrestaShop module', description: 'Returns module metadata, path, installed/active state and registered hooks.', annotations: new PsMcpToolAnnotations(title: 'Inspect PrestaShop module', readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false))]
