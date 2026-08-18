@@ -1,0 +1,10 @@
+{
+  "name": "CodeAgent Presta",
+  "slug": "codeagentpresta",
+  "version": "1.0.0",
+  "download_url": "https://github.com/CraftyTeam/codeagent-presta/releases/download/v1.0.0/codeagentpresta.zip",
+  "sha256": "3e81a9966b8cf067dcb3dc9fe49bd2fb8c7ebcad0838a8fc5b054b93daa14dd1",
+  "release_url": "https://github.com/CraftyTeam/codeagent-presta/releases/tag/v1.0.0",
+  "requires_prestashop": "8.0.0",
+  "tested_up_to": "9.x"
+}
